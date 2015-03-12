@@ -8,19 +8,15 @@ var Asterisk = require('asterisk-manager');
 var configFilename = process.argv[2];
 var config = ini.parse(fs.readFileSync(configFilename, 'utf-8'));
 
-// shared variables
-var participants = {};
-var ircChannel = '#' + config.irc.channel;
-
 // create a lockfile that goes stale after 130 minutes
 var lockFilename = '/var/tmp/voipbot-' + config.asterisk.conference +
   '-' + config.irc.channel + '.lock';
-lockfile.lock(lockFilename, {wait: 500, stale: 7800000}, function(err) {
-  if(err) {
-    console.log('error: Another voipbot instance exists: ', err, lockFilename);
-    process.exit(1);
-  }
-});
+try {
+  lockfile.lockSync(lockFilename, {stale: 7800000});
+} catch(e) {
+  console.log('error: Another voipbot instance exists: ', e, lockFilename);
+  process.exit(1);
+}
 
 // cleanup the lockfile if there is an uncaught exception or an interrupt
 process.on('uncaughtException', function(err) {
@@ -34,6 +30,10 @@ process.on('SIGINT', function() {
   process.exit(1);
 });
 
+// shared variables
+var participants = {};
+var ircChannel = '#' + config.irc.channel;
+
 // connect to the IRC channel
 var ircClient = new irc.Client(config.irc.server, config.irc.nick, {
   userName: 'voipbot',
@@ -42,13 +42,16 @@ var ircClient = new irc.Client(config.irc.server, config.irc.nick, {
   channels: [ircChannel]
 });
 
+// says the given message in the main irc channel
+var say = ircClient.say.bind(ircClient, ircChannel);
+
 // hook up an error handler to prevent exit on error
-ircClient.addListener('error', function(message) {
+ircClient.on('error', function(message) {
   console.log('error: ', message);
 });
 
-// hook up an error handler to prevent exit on error
-ircClient.addListener('join', function(channel, nick, message) {
+// handle channel join event
+ircClient.on('join', function(channel, nick, message) {
   // connect to the Asterisk server
   var asteriskClient = new Asterisk(
     config.asterisk.port, config.asterisk.server, config.asterisk.username,
@@ -62,7 +65,12 @@ ircClient.addListener('join', function(channel, nick, message) {
       conference: config.asterisk.conference
     }, function(err, res) {
       if(err) {
-        ircClient.say(ircChannel, 'Failed to get list of participants.');
+        if(err.message === 'No active conferences.') {
+          say('No one is on the conference bridge.');
+        } else {
+          say('Failed to get list of participants.');
+          console.log('Failed to get list of participants: ', err);
+        }
       }
     });
   });
@@ -71,8 +79,7 @@ ircClient.addListener('join', function(channel, nick, message) {
   asteriskClient.on('confbridgejoin', function(event) {
     if(event.conference === config.asterisk.conference) {
       participants[event.channel] = event;
-      ircClient.say(ircChannel, prettyPrintChannel(event.channel) +
-        ' has joined the conference.');
+      say(prettyPrintChannel(event.channel) + ' has joined the conference.');
     }
   });
 
@@ -81,8 +88,7 @@ ircClient.addListener('join', function(channel, nick, message) {
     if(event.conference === config.asterisk.conference) {
       if(!(event.channel in participants)) {
         participants[event.channel] = event;
-        ircClient.say(ircChannel, prettyPrintChannel(event.channel) +
-          ' is in the conference.');
+        say(prettyPrintChannel(event.channel) + ' is in the conference.');
       }
     }
   });
@@ -90,93 +96,124 @@ ircClient.addListener('join', function(channel, nick, message) {
   // announce when people leave the conference
   asteriskClient.on('confbridgeleave', function(event) {
     if(event.conference === config.asterisk.conference) {
-      ircClient.say(ircChannel, prettyPrintChannel(event.channel) +
-        ' has left the conference.');
+      say(prettyPrintChannel(event.channel) + ' has left the conference.');
       delete participants[event.channel];
     }
   });
 
   // listen to IRC channel messages
-  ircClient.addListener('message#' + config.irc.channel,
-    function(nick, message) {
+  ircClient.on('message#' + config.irc.channel, function(nick, message) {
     var voipbotRegex = new RegExp('^voip.*:', 'i');
-    if(voipbotRegex.test(message)) {
-      var args = message.split(' ');
-      // all commands must contain at least the command name
-      if(args.length < 2) {
-        return;
-      } else {
-        args.shift();
-      }
-      var command = args.shift();
-
-      // show list of participants
-      var channel = 'unknown';
-      if(command.search(/^connections.*/) === 0) {
-        var participantList = [];
-        Object.keys(participants).forEach(function(channel) {
-          participantList.push(prettyPrintChannel(channel));
-        });
-        if(Object.keys(participants).length < 1) {
-          ircClient.say(ircChannel, 'No one is on the conference bridge.');
-        } else {
-          ircClient.say(ircChannel, 'Conference participants are: ' +
-            participantList.join(', ') + '.');
-        }
-      } else if(command.search(/^mute/) === 0 && args.length > 0) {
-        channel = guessChannel(args[0]);
-        asteriskClient.action({
-          action: 'confbridgemute',
-          conference: config.asterisk.conference,
-          channel: channel
-        }, function(err, res) {
-          if(err) {
-            ircClient.say(ircChannel,
-              'Failed to mute ' + prettyPrintChannel(channel) + '.');
-            return;
-          }
-          ircClient.say(ircChannel,
-            'Muting ' + prettyPrintChannel(channel) + '.');
-        });
-      } else if(command.search(/^unmute/) === 0 && args.length > 0) {
-        channel = guessChannel(args[0]);
-        asteriskClient.action({
-          action: 'confbridgeunmute',
-          conference: config.asterisk.conference,
-          channel: channel
-        }, function(err, res) {
-          if(err) {
-            ircClient.say(ircChannel,
-              'Failed to unmute ' + prettyPrintChannel(channel) + '.');
-            return;
-          }
-          ircClient.say(ircChannel,
-            'Unmuting ' + prettyPrintChannel(channel) + '.');
-        });
-      } else if(command.search(/^disconnect/) === 0 && args.length > 0) {
-        channel = guessChannel(args[0]);
-        asteriskClient.action({
-          action: 'confbridgekick',
-          conference: config.asterisk.conference,
-          channel: channel
-        }, function(err, res) {
-          if(err) {
-            ircClient.say(ircChannel,
-              'Failed to disconnect ' + prettyPrintChannel(channel) + '.');
-            return;
-          }
-          ircClient.say(ircChannel,
-            'Disconnecting ' + prettyPrintChannel(channel) + '.');
-        });
-      } else if(command.search(/^self-destruct/) === 0 && args.length === 0) {
-        asteriskClient.disconnect();
-        ircClient.say(ircChannel, 'Shutting down and leaving...');
-        ircClient.part(ircChannel);
-        lockfile.unlockSync(lockFilename);
-        process.exit();
-      }
-
+    if(!voipbotRegex.test(message)) {
+      return;
     }
+
+    var args = message.split(' ');
+    // all commands must contain at least the command name which is
+    // the second argument
+    if(args.length < 2) {
+      return;
+    }
+
+    args.shift();
+    var command = args.shift();
+
+    // show list of participants
+    var channel = 'unknown';
+    if(command.search(/^connections.*/) === 0 && args.length === 0) {
+      var participantList = Object.keys(participants).map(function(channel) {
+        return prettyPrintChannel(channel);
+      });
+      if(participantList.length < 1) {
+        say('No one is on the conference bridge.');
+        return;
+      }
+      say('Conference participants are: ' + participantList.join(', ') + '.');
+      return;
+    }
+    if(command.search(/^mute/) === 0 && args.length === 1) {
+      channel = guessChannel(args[0]);
+      if(!channel) {
+        say('Failed to mute "' + args[0] + '"; unrecognized channel.');
+        return;
+      }
+      asteriskClient.action({
+        action: 'confbridgemute',
+        conference: config.asterisk.conference,
+        channel: channel
+      }, function(err, res) {
+        if(err) {
+          say('Failed to mute ' + prettyPrintChannel(channel) + '.');
+          return;
+        }
+        say('Muting ' + prettyPrintChannel(channel) + '.');
+      });
+      return;
+    }
+    if(command.search(/^unmute/) === 0 && args.length === 1) {
+      channel = guessChannel(args[0]);
+      if(!channel) {
+        say('Failed to unmute "' + args[0] + '"; unrecognized channel.');
+        return;
+      }
+      asteriskClient.action({
+        action: 'confbridgeunmute',
+        conference: config.asterisk.conference,
+        channel: channel
+      }, function(err, res) {
+        if(err) {
+          say('Failed to unmute ' + prettyPrintChannel(channel) + '.');
+          return;
+        }
+        say('Unmuting ' + prettyPrintChannel(channel) + '.');
+      });
+      return;
+    }
+    if(command.search(/^disconnect/) === 0 && args.length === 1) {
+      channel = guessChannel(args[0]);
+      if(!channel) {
+        say('Failed to disconnect "' + args[0] + '"; unrecognized channel.');
+        return;
+      }
+      asteriskClient.action({
+        action: 'confbridgekick',
+        conference: config.asterisk.conference,
+        channel: channel
+      }, function(err, res) {
+        if(err) {
+          say('Failed to disconnect ' + prettyPrintChannel(channel) + '.');
+          return;
+        }
+        say('Disconnecting ' + prettyPrintChannel(channel) + '.');
+      });
+      return;
+    }
+    if(args.length > 1 && args[0].search(/^is/) === 0) {
+      channel = guessChannel(command);
+      var name = args.slice(1).join(' ');
+      if(name === 'me') {
+        // 'me' is shorthand for using the person's IRC nick
+        name = nick;
+      }
+      if(!channel) {
+        say('Failed to associate "' + command + '"; unrecognized channel.');
+        return;
+      }
+      // overwrite calleridname
+      var event = participants[channel];
+      event.calleridname = name;
+      say('Associated ' + name + ' with ' + channel + '.');
+      return;
+    }
+    if(command.search(/^self-destruct/) === 0 && args.length === 0) {
+      asteriskClient.disconnect();
+      say('Shutting down and leaving...');
+      ircClient.part(ircChannel);
+      lockfile.unlockSync(lockFilename);
+      process.exit();
+    }
+
+    say('Unknown command: ' + command + ' ' + args.join(' '));
   });
 });
 
@@ -189,7 +226,7 @@ ircClient.addListener('join', function(channel, nick, message) {
  * @return the pretty-printed channel
  */
 function prettyPrintChannel(channel) {
-  var prettyPrintedChannel = "unknown participant";
+  var prettyPrintedChannel = 'unknown participant';
 
   if(channel in participants) {
     prettyPrintedChannel =
