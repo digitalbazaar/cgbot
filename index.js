@@ -33,6 +33,7 @@ process.on('SIGINT', function() {
 // shared variables
 var participants = {};
 var ircChannel = '#' + config.irc.channel;
+var asteriskClient;
 
 // connect to the IRC channel
 var ircClient = new irc.Client(config.irc.server, config.irc.nick, {
@@ -52,8 +53,11 @@ ircClient.on('error', function(message) {
 
 // handle channel join event
 ircClient.on('join', function(channel, nick, message) {
+  if(nick !== config.irc.nick) {
+    return;
+  }
   // connect to the Asterisk server
-  var asteriskClient = new Asterisk(
+  asteriskClient = new Asterisk(
     config.asterisk.port, config.asterisk.server, config.asterisk.username,
     config.asterisk.password, true);
   asteriskClient.keepConnected();
@@ -67,6 +71,7 @@ ircClient.on('join', function(channel, nick, message) {
       if(err) {
         if(err.message === 'No active conferences.') {
           say('No one is on the conference bridge.');
+          shutdown();
         } else {
           say('Failed to get list of participants.');
           console.log('Failed to get list of participants: ', err);
@@ -98,6 +103,10 @@ ircClient.on('join', function(channel, nick, message) {
     if(event.conference === config.asterisk.conference) {
       say(prettyPrintChannel(event.channel) + ' has left the conference.');
       delete participants[event.channel];
+      if(Object.keys(participants).length === 0) {
+        say('No one is on the conference bridge.');
+        shutdown();
+      }
     }
   });
 
@@ -126,6 +135,7 @@ ircClient.on('join', function(channel, nick, message) {
       });
       if(participantList.length < 1) {
         say('No one is on the conference bridge.');
+        shutdown();
         return;
       }
       say('Conference participants are: ' + participantList.join(', ') + '.');
@@ -206,11 +216,8 @@ ircClient.on('join', function(channel, nick, message) {
       return;
     }
     if(command.search(/^self-destruct/) === 0 && args.length === 0) {
-      asteriskClient.disconnect();
-      say('Shutting down and leaving...');
-      ircClient.part(ircChannel);
-      lockfile.unlockSync(lockFilename);
-      process.exit();
+      shutdown();
+      return;
     }
 
     say('Unknown command: ' + command + ' ' + args.join(' '));
@@ -260,4 +267,12 @@ function guessChannel(text) {
   });
 
   return guess;
+}
+
+function shutdown() {
+  asteriskClient.disconnect();
+  say('Shutting down and leaving...');
+  ircClient.part(ircChannel);
+  lockfile.unlockSync(lockFilename);
+  process.exit();
 }
