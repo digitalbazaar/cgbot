@@ -34,15 +34,34 @@ process.on('SIGINT', function() {
 var participants = {};
 var speakerQueue = [];
 var ircChannel = '#' + config.irc.channel;
+var ircChannelWithOptPass = '#' + config.irc.channel;
 var asteriskClient;
 
+// check to see if there is a channel password
+if(config.irc.chanpass) {
+  ircChannelWithOptPass += ' ' + config.irc.chanpass;
+}
+
 // connect to the IRC channel
-var ircClient = new irc.Client(config.irc.server, config.irc.nick, {
+var ircOptions = {
   userName: 'voipbot',
   realName: 'Digital Bazaar VoIP bot',
   port: parseInt(config.irc.port, 10),
-  channels: [ircChannel]
-});
+  channels: [ircChannelWithOptPass]
+};
+
+// check if TLS should be used to connect
+if(config.irc.port === '6697') {
+  ircOptions.secure = true;
+  ircOptions.selfSigned = true;
+}
+
+// check to see if the server requires a password
+if(config.irc.servpass) {
+  ircOptions.password = config.irc.servpass;
+}
+
+var ircClient = new irc.Client(config.irc.server, config.irc.nick, ircOptions);
 
 // says the given message in the main irc channel
 var say = ircClient.say.bind(ircClient, ircChannel);
