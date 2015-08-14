@@ -68,12 +68,15 @@ var say = ircClient.say.bind(ircClient, ircChannel);
 
 // hook up an error handler to prevent exit on error
 ircClient.on('error', function(message) {
+  if(_shutdown) {
+    return exit();
+  }
   console.log('error: ', message);
 });
 
 // handle channel join event
 ircClient.on('join', function(channel, nick, message) {
-  if(nick !== config.irc.nick) {
+  if(nick !== config.irc.nick || _shutdown) {
     return;
   }
   // connect to the Asterisk server
@@ -84,13 +87,14 @@ ircClient.on('join', function(channel, nick, message) {
 
   // get a list of conference participants on join
   asteriskClient.on('connect', function(event) {
+    say('Conference started.');
     asteriskClient.action({
       action: 'confbridgelist',
       conference: config.asterisk.conference
     }, function(err, res) {
       if(err) {
         if(err.message === 'No active conferences.') {
-          say('No one is on the conference bridge.');
+          say('No one is in the conference.');
           shutdown();
         } else {
           say('Failed to get list of participants.');
@@ -98,6 +102,10 @@ ircClient.on('join', function(channel, nick, message) {
         }
       }
     });
+  });
+
+  asteriskClient.on('close', function(event) {
+    shutdown();
   });
 
   // announce when people join the conference
@@ -124,7 +132,7 @@ ircClient.on('join', function(channel, nick, message) {
       say(prettyPrintChannel(event.channel) + ' has left the conference.');
       delete participants[event.channel];
       if(Object.keys(participants).length === 0) {
-        say('No one is on the conference bridge.');
+        say('No one is in the conference.');
         shutdown();
       }
     }
@@ -132,6 +140,9 @@ ircClient.on('join', function(channel, nick, message) {
 
   // listen to IRC channel messages
   ircClient.on('message#' + config.irc.channel, function(nick, message) {
+    if(_shutdown) {
+      return;
+    }
     // handle non-voipbot directed channel commands
     var args = message.split(' ');
     var command = args.shift();
@@ -205,7 +216,7 @@ ircClient.on('join', function(channel, nick, message) {
         return prettyPrintChannel(channel);
       });
       if(participantList.length < 1) {
-        say('No one is on the conference bridge.');
+        say('No one is in the conference.');
         shutdown();
         return;
       }
@@ -368,10 +379,23 @@ function guessChannel(text) {
   return guess;
 }
 
+var _shutdown = false;
 function shutdown() {
+  if(_shutdown) {
+    return;
+  }
+  _shutdown = true;
   asteriskClient.disconnect();
-  say('Shutting down and leaving...');
-  ircClient.part(ircChannel);
+  ircClient.disconnect(
+    'Shutting down...', function() {
+    exit();
+  });
+}
+
+function exit() {
+  if(!_shutdown) {
+    asteriskClient.disconnect();
+  }
   lockfile.unlockSync(lockFilename);
   process.exit();
 }
