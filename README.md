@@ -1,6 +1,6 @@
-# voipbot
+# W3C Community Group Bot
 
-A Voice over Internet Protocol (VoIP) Internet Relay Chat (IRC)
-bot that is used during meetings to record audio, manage the
+A multi-protocol (WebRTC, XMPP, IRC) bot that is used during W3C
+Community Group meetings to record audio, manage the
 speaker queue, and perform a variety of other tasks that are
-useful when running W3C Community Group meetings
+useful when running W3C Community Group meetings.
