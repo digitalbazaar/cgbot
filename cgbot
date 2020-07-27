@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+/*!
+ * Copyright (c) 2020 Digital Bazaar, Inc. All rights reserved.
+ */
+'use strict';
+
+const cgbot = require('.');
+const fsp = require('fs').promises;
+
+// ignore self-signed TLS cert
+const process = require('process');
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+
+// run the program
+main();
+
+async function main() {
+  require('yargs')
+    .usage('Usage: $0 <command>')
+    .option('verbose', {
+      describe: 'Provide verbose logging',
+      alias: 'v',
+      boolean: true
+    })
+    .config('config', async configFile => {
+      const config = JSON.parse(await fsp.readFile(configFile));
+      console.log('config', config);
+      return config;
+    })
+    .alias('c', 'config')
+    .alias('h', 'help')
+    .help('help', 'Show help for cborld command.')
+    .command('monitor', 'Monitors the meeting server XMPP channels.',
+      yargs => {
+        yargs
+          .example([
+            ['$0 monitor -c /etc/cgbot/ccg.cfg',
+              'Monitors using the configuration information provided.']
+          ]);
+      }, monitorCommand)
+    .argv;
+}
+
+// Yargs command to listen
+async function monitorCommand(args) {
+  try {
+    const config = JSON.parse(await fsp.readFile(args.config));
+    console.log('Monitoring...', config);
+    await cgbot.monitor(config);
+  } catch(e) {
+    console.error(e.stack);
+    process.exit(1);
+  }
+}
