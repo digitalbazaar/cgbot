@@ -9,7 +9,7 @@ const fsp = require('fs').promises;
 
 // ignore self-signed TLS cert
 const process = require('process');
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // run the program
 main();
@@ -22,14 +22,13 @@ async function main() {
       alias: 'v',
       boolean: true
     })
-    .config('config', async configFile => {
-      const config = JSON.parse(await fsp.readFile(configFile));
-      console.log('config', config);
-      return config;
+    .option('config', {
+      describe: 'Connection configuration file',
+      alias: 'c'
     })
-    .alias('c', 'config')
     .alias('h', 'help')
     .help('help', 'Show help for cborld command.')
+    .demandOption('config')
     .command('monitor', 'Monitors the meeting server XMPP channels.',
       yargs => {
         yargs
@@ -38,15 +37,35 @@ async function main() {
               'Monitors using the configuration information provided.']
           ]);
       }, monitorCommand)
+    .command('manage', 'Manage a specific XMPP and IRC channel.',
+      yargs => {
+        yargs
+          .example([
+            ['$0 manage -c /etc/cgbot/ccg.cfg --channel weekly',
+              'Manages using the configuration information provided.']
+          ]);
+      }, manageCommand)
     .argv;
 }
 
-// Yargs command to listen
+// Yargs command to monitor
 async function monitorCommand(args) {
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
     console.log('Monitoring...', config);
     await cgbot.monitor(config);
+  } catch(e) {
+    console.error(e.stack);
+    process.exit(1);
+  }
+}
+
+// Yargs command to manage
+async function manageCommand(args) {
+  try {
+    const config = JSON.parse(await fsp.readFile(args.config));
+    console.log('Managing...', config);
+    await cgbot.manage(config);
   } catch(e) {
     console.error(e.stack);
     process.exit(1);
