@@ -12,7 +12,7 @@
     "uuid": "^8.2.0",
     "yargs": "^15.3.1",
     "lockfile": "~1.0.0",
-    "irc": "~0.3.9"
+    "irc": "~0.5.2"
   },
   "devDependencies": {
     "benchmark": "^2.1.4",
