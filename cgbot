@@ -33,16 +33,21 @@ async function main() {
       yargs => {
         yargs
           .example([
-            ['$0 monitor -c /etc/cgbot/ccg.cfg',
+            ['$0 -c /etc/cgbot/ccg.cfg monitor',
               'Monitors using the configuration information provided.']
           ]);
       }, monitorCommand)
     .command('manage', 'Manage a specific XMPP and IRC channel.',
       yargs => {
         yargs
+          .option('meeting', {
+            describe: 'The meeting to manage.',
+            alias: 'm'
+          })
+          .demandOption('meeting')
           .example([
-            ['$0 manage -c /etc/cgbot/ccg.cfg --channel weekly',
-              'Manages using the configuration information provided.']
+            ['$0 -c /etc/cgbot/ccg.cfg manage --meeting weekly',
+              'Manages a meeting using the provided config.']
           ]);
       }, manageCommand)
     .argv;
@@ -64,7 +69,7 @@ async function monitorCommand(args) {
 async function manageCommand(args) {
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
-    console.log('Managing...', config);
+    console.log('Managing...', args.channel, config);
     await cgbot.manage(config);
   } catch(e) {
     console.error(e.stack);
