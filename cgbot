@@ -69,8 +69,8 @@ async function monitorCommand(args) {
 async function manageCommand(args) {
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
-    console.log('Managing...', args.channel, config);
-    await cgbot.manage(config);
+    console.log('Managing...', args.meeting, config);
+    await cgbot.manage({meeting: args.meeting, ...config});
   } catch(e) {
     console.error(e.stack);
     process.exit(1);
