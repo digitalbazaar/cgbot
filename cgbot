@@ -50,6 +50,7 @@ async function main() {
               'Manages a meeting using the provided config.']
           ]);
       }, manageCommand)
+    .demandCommand(1, 'You need to specify a command.')
     .argv;
 }
 
@@ -57,7 +58,9 @@ async function main() {
 async function monitorCommand(args) {
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
-    console.log('Monitoring...', config);
+    const meetings = Object.keys(config.meetings).join(', ');
+    const domain = config.xmppOptions.domain;
+    console.log(`Monitoring ${domain} for meetings: ${meetings}.`);
     await cgbot.monitor(config);
   } catch(e) {
     console.error(e.stack);
@@ -69,7 +72,14 @@ async function monitorCommand(args) {
 async function manageCommand(args) {
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
-    console.log('Managing...', args.meeting, config);
+    const domain = config.xmppOptions.domain;
+    const meeting = args.meeting;
+    if(!config.meetings[meeting]) {
+      console.error(`Unknown meeting '${meeting}' in ${args.config}.`);
+      process.exit(1);
+    }
+
+    console.log(`Managing https://${domain}/${meeting}.`);
     await cgbot.manage({meeting: args.meeting, ...config});
   } catch(e) {
     console.error(e.stack);
