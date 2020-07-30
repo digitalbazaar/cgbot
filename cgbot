@@ -6,9 +6,10 @@
 
 const cgbot = require('.');
 const fsp = require('fs').promises;
+const lockfile = require('lockfile');
+const process = require('process');
 
 // ignore self-signed TLS cert
-const process = require('process');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // run the program
@@ -56,10 +57,12 @@ async function main() {
 
 // Yargs command to monitor
 async function monitorCommand(args) {
+  // attempt to monitor channels
   try {
     const config = JSON.parse(await fsp.readFile(args.config));
     const meetings = Object.keys(config.meetings).join(', ');
     const domain = config.xmppOptions.domain;
+    checkLockfile('/var/tmp/cgbot-monitor.lock');
     console.log(`Monitoring ${domain} for meetings: ${meetings}.`);
     await cgbot.monitor(config);
   } catch(e) {
@@ -80,9 +83,33 @@ async function manageCommand(args) {
     }
 
     console.log(`Managing https://${domain}/${meeting}.`);
+    checkLockfile(`/var/tmp/cgbot-manage-${meeting}.lock`);
     await cgbot.manage({meeting: args.meeting, ...config});
   } catch(e) {
     console.error(e.stack);
     process.exit(1);
   }
+}
+
+function checkLockfile(lockFilename) {
+  // create a lockfile that goes stale after 130 minutes
+  try {
+    lockfile.lockSync(lockFilename, {stale: 7800000});
+  } catch(e) {
+    console.log(e, '\nError: Another cgbot instance exists.');
+    process.exit(1);
+  }
+
+  // cleanup the lockfile if there is an uncaught exception or an interrupt
+  process.on('uncaughtException', err => {
+    console.log('uncaught exception: ', err.stack);
+    lockfile.unlockSync(lockFilename);
+    process.exit(1);
+  });
+
+  process.on('SIGINT', () => {
+    console.log('\nCleaning up lock file and exiting.');
+    lockfile.unlockSync(lockFilename);
+    process.exit(1);
+  });
 }
