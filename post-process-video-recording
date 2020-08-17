@@ -1,0 +1,20 @@
+#!/bin/bash 
+#
+# Post-process the video recording
+
+echo "Post processing CCG video recording..."
+echo $@
+mp4file=`ls -1 $@/*.mp4 | head -n 1`
+echo $mp4file
+basefile="${mp4file##*/}"
+echo $basefile
+oggbase=w3c-ccg-`echo $basefile | cut -d - -f 1-3 | tr _ -`.ogg
+echo $oggbase
+oggfile="$@/../$oggbase"
+echo $oggfile
+newmp4file="${oggfile%.ogg}.mp4"
+ffmpeg -i "$mp4file" -vn -c:a libvorbis -ab 32k -ar 22050 -y "$oggfile"
+cp $mp4file $newmp4file
+
+echo "Post processing complete."
+
